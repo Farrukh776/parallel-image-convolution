@@ -37,6 +37,9 @@ target_link_libraries(convcore PUBLIC OpenMP::OpenMP_CXX)
 add_executable(convolve src/main.cpp)
 target_link_libraries(convolve PRIVATE convcore)
 
+add_executable(benchmark src/benchmark.cpp)
+target_link_libraries(benchmark PRIVATE convcore)
+
 enable_testing()
 add_executable(test_convolve tests/test_convolve.cpp)
 target_link_libraries(test_convolve PRIVATE convcore)

@@ -11,7 +11,7 @@ images, once sequentially and once with OpenMP, and compares the two.
 | 1 | Project setup | done |
 | 2 | Sequential convolution | done |
 | 3 | OpenMP parallelisation | done |
-| 4 | Benchmark mode over workload sizes and thread counts | to do |
+| 4 | Benchmark mode over workload sizes and thread counts | done |
 | 5 | Speedup and efficiency graphs | to do |
 | 6 | Report and demonstration | to do |
 
@@ -106,21 +106,60 @@ the sequential one, and the tests check that.
 | `src/kernels.cpp` | the three kernels |
 | `src/image.cpp` | image struct, BMP load/save, test image generator |
 | `src/main.cpp` | command-line program and timing |
+| `src/benchmark.cpp` | benchmark over sizes, filters and thread counts |
 | `tests/test_convolve.cpp` | correctness tests |
 
-## Early measurements
+## Benchmarks
 
-5x5 blur on an 8000x6000 image (48 megapixels), AMD Ryzen 5 3500U
-(4 cores, 8 hardware threads), MSVC Release build, static schedule.
-One run each, so these are indicative only; proper repeated benchmarks
-are phase 4.
+```bash
+./build/Release/benchmark.exe
+```
 
-| Threads | Time | Speedup | Efficiency |
+This times the sequential version and the OpenMP version for every
+combination of image size, filter and thread count, checks each parallel
+output against the sequential one, and writes `results/benchmark.csv`.
+
+| Option | Default |
+|---|---|
+| `--sizes LIST` | `2000x1500,4000x3000,8000x6000` |
+| `--filters LIST` | `edge,blur,sharpen` |
+| `--threads LIST` | 1, 2, 4, ... up to the number of logical processors |
+| `--schedules LIST` | `static` |
+| `--repeats N` | 3 |
+| `--output FILE` | `results/benchmark.csv` |
+
+Each configuration is run `--repeats` times. The fastest run (`best_ms`) is
+used for speedup, because interference from other programs can only slow a
+run down; the average (`mean_ms`) is recorded too.
+
+- Speedup = sequential time / parallel time
+- Efficiency = speedup / threads
+
+For clean numbers, close other programs, plug the laptop in, and use more
+repeats, for example `--repeats 5`.
+
+### Results so far
+
+AMD Ryzen 5 3500U (4 cores, 8 hardware threads), MSVC Release build, static
+schedule, best of 3 runs. Full data is in `results/benchmark.csv`.
+
+Speedup on the 8000x6000 (48 megapixel) image:
+
+| Filter | Sequential | 1 thread | 2 threads | 4 threads | 8 threads |
+|---|---|---|---|---|---|
+| edge 3x3 | 2675 ms | 1.03 | 1.76 | 2.96 | 5.12 |
+| blur 5x5 | 5594 ms | 1.01 | 1.44 | 2.50 | 4.59 |
+| sharpen 3x3 | 2173 ms | 0.75 | 1.29 | 2.26 | 3.81 |
+
+Speedup at 8 threads as the image grows:
+
+| Filter | 3 MP | 12 MP | 48 MP |
 |---|---|---|---|
-| sequential | about 6.9 s | 1.00 | |
-| 1 | 6.6 s | 1.04 | 104% |
-| 2 | 4.1 s | 1.73 | 86% |
-| 4 | 2.6 s | 2.95 | 74% |
-| 8 | 1.5 s | 4.54 | 57% |
+| edge 3x3 | 3.43 | 3.43 | 5.12 |
+| blur 5x5 | 4.14 | 3.95 | 4.59 |
+| sharpen 3x3 | 3.45 | 4.19 | 3.81 |
 
-Speedup = sequential time / parallel time. Efficiency = speedup / threads.
+These were measured on a laptop that was in use at the time, and they are
+noisy: the 1-thread OpenMP runs range from 0.75 to 1.33 of the sequential
+time, when they should all be close to 1.0. They should be re-measured on a
+quiet machine before going into the report.
