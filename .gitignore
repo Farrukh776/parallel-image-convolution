@@ -1,0 +1,13 @@
+# CMake build directories
+build/
+build-*/
+out/
+
+# Generated images and benchmark results
+output/
+*.bmp
+
+# Editor / IDE
+.vs/
+.vscode/
+*.user
