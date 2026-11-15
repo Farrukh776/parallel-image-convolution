@@ -12,7 +12,7 @@ images, once sequentially and once with OpenMP, and compares the two.
 | 2 | Sequential convolution | done |
 | 3 | OpenMP parallelisation | done |
 | 4 | Benchmark mode over workload sizes and thread counts | done |
-| 5 | Speedup and efficiency graphs | to do |
+| 5 | Speedup and efficiency graphs | done |
 | 6 | Report and demonstration | to do |
 
 ## Requirements
@@ -107,6 +107,7 @@ the sequential one, and the tests check that.
 | `src/image.cpp` | image struct, BMP load/save, test image generator |
 | `src/main.cpp` | command-line program and timing |
 | `src/benchmark.cpp` | benchmark over sizes, filters and thread counts |
+| `scripts/plot_results.py` | turns the benchmark CSV into graphs |
 | `tests/test_convolve.cpp` | correctness tests |
 
 ## Benchmarks
@@ -128,38 +129,67 @@ output against the sequential one, and writes `results/benchmark.csv`.
 | `--repeats N` | 3 |
 | `--output FILE` | `results/benchmark.csv` |
 
-Each configuration is run `--repeats` times. The fastest run (`best_ms`) is
-used for speedup, because interference from other programs can only slow a
-run down; the average (`mean_ms`) is recorded too.
+Each configuration is run `--repeats` times. The runs are interleaved: one
+round runs the sequential version and then every thread count, then the next
+round starts. A laptop CPU changes speed as it heats up, so running all the
+sequential measurements first and all the 8-thread ones last would mix that
+drift into the speedup figures. The fastest run (`best_ms`) is used for
+speedup, because interference from other programs can only slow a run down;
+the average (`mean_ms`) is recorded too.
 
 - Speedup = sequential time / parallel time
 - Efficiency = speedup / threads
 
-For clean numbers, close other programs, plug the laptop in, and use more
-repeats, for example `--repeats 5`.
+For clean numbers, close other programs and plug the laptop in.
 
-### Results so far
+## Graphs
+
+```bash
+pip install matplotlib
+python scripts/plot_results.py --physical-cores 4 --machine "Ryzen 5 3500U"
+```
+
+This reads `results/benchmark.csv` and writes four PNG files to `plots/`.
+
+### Results
 
 AMD Ryzen 5 3500U (4 cores, 8 hardware threads), MSVC Release build, static
-schedule, best of 3 runs. Full data is in `results/benchmark.csv`.
+schedule, best of 5 interleaved runs. Full data is in `results/benchmark.csv`.
+
+![Speedup](plots/speedup.png)
+
+![Execution time](plots/execution_time.png)
+
+![Efficiency](plots/efficiency.png)
+
+![Speedup by image size](plots/scalability.png)
 
 Speedup on the 8000x6000 (48 megapixel) image:
 
 | Filter | Sequential | 1 thread | 2 threads | 4 threads | 8 threads |
 |---|---|---|---|---|---|
-| edge 3x3 | 2675 ms | 1.03 | 1.76 | 2.96 | 5.12 |
-| blur 5x5 | 5594 ms | 1.01 | 1.44 | 2.50 | 4.59 |
-| sharpen 3x3 | 2173 ms | 0.75 | 1.29 | 2.26 | 3.81 |
+| edge 3x3 | 2483 ms | 0.94 | 1.53 | 2.54 | 3.75 |
+| blur 5x5 | 5847 ms | 0.98 | 1.54 | 2.57 | 3.86 |
+| sharpen 3x3 | 2376 ms | 1.15 | 1.66 | 2.57 | 3.56 |
 
 Speedup at 8 threads as the image grows:
 
 | Filter | 3 MP | 12 MP | 48 MP |
 |---|---|---|---|
-| edge 3x3 | 3.43 | 3.43 | 5.12 |
-| blur 5x5 | 4.14 | 3.95 | 4.59 |
-| sharpen 3x3 | 3.45 | 4.19 | 3.81 |
+| edge 3x3 | 3.19 | 3.45 | 3.75 |
+| blur 5x5 | 3.34 | 3.47 | 3.86 |
+| sharpen 3x3 | 2.80 | 3.64 | 3.56 |
 
-These were measured on a laptop that was in use at the time, and they are
-noisy: the 1-thread OpenMP runs range from 0.75 to 1.33 of the sequential
-time, when they should all be close to 1.0. They should be re-measured on a
-quiet machine before going into the report.
+What the numbers show:
+
+- Up to 4 threads, each thread has its own physical core, and speedup reaches
+  about 2.5x (about 64% efficiency).
+- From 4 to 8 threads the extra threads share cores through simultaneous
+  multithreading, so doubling the threads adds only about 1.4 to 1.5x more.
+- Larger images scale slightly better at 8 threads, though the difference is
+  close to the measurement noise.
+
+The measurements were taken on a laptop that was in use, so some noise
+remains: 1-thread OpenMP runs, which should equal the sequential time, land
+between 0.84 and 1.45 of it on the smallest image and between 0.94 and 1.15
+on the two larger ones.

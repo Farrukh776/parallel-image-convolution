@@ -54,31 +54,25 @@ Schedule parse_schedule(const std::string& name) {
 }
 
 struct Timing {
-    double best_ms = 0.0; // fastest run
-    double mean_ms = 0.0; // average of all runs
+    double best_ms = 0.0;  // fastest run
+    double total_ms = 0.0; // sum of all runs, for the mean
+    int runs = 0;
+
+    void add(double ms) {
+        if (runs == 0 || ms < best_ms) best_ms = ms;
+        total_ms += ms;
+        ++runs;
+    }
+    double mean_ms() const { return runs ? total_ms / runs : 0.0; }
 };
 
-// Runs `work` `repeats` times and keeps the result of the last run in `result`.
-//
-// The fastest run is the headline number. Anything that disturbs a run
-// (another program waking up, the OS moving a thread, the CPU slowing down
-// when hot) can only make it slower, never faster, so the minimum is the
-// measurement least affected by noise. The mean is recorded as well so the
-// spread is visible.
+// Runs `work` once, stores its image in `result` and returns the elapsed
+// wall-clock time in milliseconds.
 template <typename Work>
-Timing time_runs(int repeats, Image& result, Work work) {
-    Timing t;
-    double total = 0.0;
-    for (int run = 0; run < repeats; ++run) {
-        const double start = omp_get_wtime();
-        result = work();
-        const double ms = (omp_get_wtime() - start) * 1000.0;
-
-        total += ms;
-        if (run == 0 || ms < t.best_ms) t.best_ms = ms;
-    }
-    t.mean_ms = total / repeats;
-    return t;
+double time_once(Image& result, Work work) {
+    const double start = omp_get_wtime();
+    result = work();
+    return (omp_get_wtime() - start) * 1000.0;
 }
 
 } // namespace
@@ -170,44 +164,70 @@ int main(int argc, char** argv) {
                 std::printf("  %-10s %-8s %7s %11s %11s %8s %10s\n", "mode", "schedule",
                             "threads", "best ms", "mean ms", "speedup", "efficiency");
 
-                // Sequential baseline: every speedup below is relative to this.
-                Image reference;
-                const Timing seq = time_runs(repeats, reference, [&] {
-                    return convolve_sequential(input, kernel);
-                });
-                std::printf("  %-10s %-8s %7d %11.1f %11.1f %8.2f %9.0f%%\n", "sequential",
-                            "-", 1, seq.best_ms, seq.mean_ms, 1.0, 100.0);
-                csv << kernel.name << ',' << kernel.size << ',' << width << ',' << height
-                    << ',' << megapixels << ",sequential,none,1," << repeats << ','
-                    << seq.best_ms << ',' << seq.mean_ms << ",1,1,yes\n";
+                // One entry per parallel configuration (schedule x thread count).
+                struct Config {
+                    Schedule schedule;
+                    int threads;
+                    Timing timing;
+                    bool correct;
+                };
+                std::vector<Config> configs;
+                for (Schedule schedule : schedules)
+                    for (int threads : thread_counts)
+                        configs.push_back({schedule, threads, Timing{}, true});
 
-                for (Schedule schedule : schedules) {
-                    for (int threads : thread_counts) {
-                        Image result;
-                        const Timing par = time_runs(repeats, result, [&] {
-                            return convolve_parallel(input, kernel, threads, schedule);
-                        });
-
-                        // Speedup    S(p) = T_sequential / T_parallel(p)
-                        // Efficiency E(p) = S(p) / p
-                        const double speedup = seq.best_ms / par.best_ms;
-                        const double efficiency = speedup / threads;
-                        const bool correct = result.data == reference.data;
-                        all_correct = all_correct && correct;
-
-                        std::printf("  %-10s %-8s %7d %11.1f %11.1f %8.2f %9.0f%%%s\n",
-                                    "openmp", schedule_name(schedule), threads, par.best_ms,
-                                    par.mean_ms, speedup, 100.0 * efficiency,
-                                    correct ? "" : "   OUTPUT MISMATCH");
-                        csv << kernel.name << ',' << kernel.size << ',' << width << ','
-                            << height << ',' << megapixels << ",openmp,"
-                            << schedule_name(schedule) << ',' << threads << ',' << repeats
-                            << ',' << par.best_ms << ',' << par.mean_ms << ',' << speedup
-                            << ',' << efficiency << ',' << (correct ? "yes" : "NO") << '\n';
-                        csv.flush(); // keep finished rows if the run is interrupted
-                        std::fflush(stdout);
+                // The runs are interleaved: each round runs the sequential
+                // version once and then every parallel configuration once.
+                // A laptop CPU changes speed over time (temperature, power
+                // limits, background programs). If all sequential runs were
+                // done first and all 8-thread runs last, that drift would be
+                // mistaken for speedup or slowdown. Interleaving spreads it
+                // evenly over every configuration.
+                //
+                // The fastest run of each configuration is the headline
+                // number: disturbances can only make a run slower, never
+                // faster, so the minimum is the least affected by noise.
+                Timing seq;
+                Image reference, result;
+                for (int round = 0; round < repeats; ++round) {
+                    seq.add(time_once(reference, [&] {
+                        return convolve_sequential(input, kernel);
+                    }));
+                    for (Config& c : configs) {
+                        c.timing.add(time_once(result, [&] {
+                            return convolve_parallel(input, kernel, c.threads, c.schedule);
+                        }));
+                        c.correct = c.correct && result.data == reference.data;
                     }
                 }
+
+                // Sequential baseline: every speedup below is relative to this.
+                std::printf("  %-10s %-8s %7d %11.1f %11.1f %8.2f %9.0f%%\n", "sequential",
+                            "-", 1, seq.best_ms, seq.mean_ms(), 1.0, 100.0);
+                csv << kernel.name << ',' << kernel.size << ',' << width << ',' << height
+                    << ',' << megapixels << ",sequential,none,1," << repeats << ','
+                    << seq.best_ms << ',' << seq.mean_ms() << ",1,1,yes\n";
+
+                for (const Config& c : configs) {
+                    // Speedup    S(p) = T_sequential / T_parallel(p)
+                    // Efficiency E(p) = S(p) / p
+                    const double speedup = seq.best_ms / c.timing.best_ms;
+                    const double efficiency = speedup / c.threads;
+                    all_correct = all_correct && c.correct;
+
+                    std::printf("  %-10s %-8s %7d %11.1f %11.1f %8.2f %9.0f%%%s\n",
+                                "openmp", schedule_name(c.schedule), c.threads,
+                                c.timing.best_ms, c.timing.mean_ms(), speedup,
+                                100.0 * efficiency, c.correct ? "" : "   OUTPUT MISMATCH");
+                    csv << kernel.name << ',' << kernel.size << ',' << width << ','
+                        << height << ',' << megapixels << ",openmp,"
+                        << schedule_name(c.schedule) << ',' << c.threads << ',' << repeats
+                        << ',' << c.timing.best_ms << ',' << c.timing.mean_ms() << ','
+                        << speedup << ',' << efficiency << ',' << (c.correct ? "yes" : "NO")
+                        << '\n';
+                }
+                csv.flush(); // keep finished rows if the run is interrupted
+                std::fflush(stdout);
             }
         }
 
