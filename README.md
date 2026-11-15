@@ -13,7 +13,7 @@ images, once sequentially and once with OpenMP, and compares the two.
 | 3 | OpenMP parallelisation | done |
 | 4 | Benchmark mode over workload sizes and thread counts | done |
 | 5 | Speedup and efficiency graphs | done |
-| 6 | Report and demonstration | to do |
+| 6 | Report and demonstration | report drafted |
 
 ## Requirements
 
@@ -193,3 +193,24 @@ The measurements were taken on a laptop that was in use, so some noise
 remains: 1-thread OpenMP runs, which should equal the sequential time, land
 between 0.84 and 1.45 of it on the smallest image and between 0.94 and 1.15
 on the two larger ones.
+
+### Schedule comparison
+
+```bash
+./build/Release/benchmark.exe --sizes 8000x6000 --schedules static,dynamic,guided --output results/schedules.csv
+```
+
+Time in milliseconds on 8 threads, 48 MP image, best of 5 interleaved runs
+(`results/schedules.csv`):
+
+| Filter | Sequential | static | dynamic, chunk 16 | guided, chunk 16 |
+|---|---|---|---|---|
+| edge 3x3 | 2924 | 567 | 512 | 578 |
+| blur 5x5 | 5437 | 1446 | 1289 | 1271 |
+| sharpen 3x3 | 1999 | 667 | 598 | 590 |
+
+Dynamic was about 10% faster than static on 8 threads for all three filters;
+guided was faster for two and slightly slower for one. At 1 to 4 threads the
+differences are within the noise. This run was a separate session from the
+results above and its absolute speedups are higher, so compare schedules only
+within this table.
