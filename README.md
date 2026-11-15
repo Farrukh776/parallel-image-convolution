@@ -15,6 +15,11 @@ images, once sequentially and once with OpenMP, and compares the two.
 | 5 | Speedup and efficiency graphs | done |
 | 6 | Report and demonstration | report drafted |
 
+## Documents
+
+- [Project report](docs/REPORT.md)
+- [Viva preparation sheet](docs/VIVA.md): questions and answers, and a demo script
+
 ## Requirements
 
 - CMake 3.16 or newer
